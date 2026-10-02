@@ -1,0 +1,13 @@
+# Gradle 构建产物与缓存
+build/
+.gradle/
+
+# 编辑器 / IDE
+.idea/
+*.iml
+.vscode/
+out/
+bin/
+
+# 系统
+.DS_Store
