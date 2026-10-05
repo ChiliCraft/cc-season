@@ -1,30 +1,43 @@
-# cc-season 默认配置（所有周期与数值均可热重载）
+# cc-season 默认配置（所有周期与数值均可通过 /cc reload 热载）
 calendar:
   days-per-season: 28
+  # 真实时间分钟数/天，0 = 关闭；>0 优先于下面两项
   real-time-minutes-per-day: 0
+  # 跟随主世界昼夜推进（full_day 翻日）
   follow-overworld-time: false
+  # 睡觉前进一天（上面优先，两者互斥）
   advance-on-sleep: true
+  # 无在线玩家时暂停推进
   require-players: true
+  # 追帧上限（天），防止服务器关服后一次性翻过多天
   max-catchup: 2
   overworld: world
+  # 尚未存在 data/calendar.yml 时生效；之后以 data/calendar.yml 为准
   start-year: 1
   start-day: 1
   start-season: spring
 weather:
   enabled: true
+  # 天气检查周期（秒），低频设计，避免每 tick 调用
   check-seconds: 60
-  # 不接管这些世界的天气，避免影响独立玩法世界。
+  # 不接管这些世界的天气，避免影响独立玩法世界
   disabled-worlds: []
-  seasons:
-    spring: {clear: 0.65, rain: 0.30, thunder: 0.05}
-    summer: {clear: 0.80, rain: 0.15, thunder: 0.05}
-    autumn: {clear: 0.55, rain: 0.35, thunder: 0.10}
-    winter: {clear: 0.45, rain: 0.45, thunder: 0.10}
+  # 排期天气：每季按「雨天数」预排本季每日天气（换季或热载后季节变化时重新排期）
+  # 说明：排期天气会在检查周期覆盖管理员手动 /weather 的改动
+  rainy-days:
+    spring: 8
+    summer: 4
+    autumn: 7
+    winter: 6
+  # 未在上面列出的季节使用的雨天数
+  rainy-days-per-season: 5
+  # 雨天转为雷暴的概率
+  thunder-chance: 0.20
 hud:
   enabled: true
-  # 支持 MiniMessage；三个百分号变量在显示前替换。
+  # 支持 MiniMessage；三个百分号变量在显示前替换
   title: "<gold>第%year%年 · %season% · 第%day%天</gold>"
-  # 可用值：PINK、YELLOW、RED、BLUE、GREEN、PURPLE、WHITE。
+  # 可用值：PINK、YELLOW、RED、BLUE、GREEN、PURPLE、WHITE
   colors:
     spring: PINK
     summer: YELLOW
@@ -32,41 +45,110 @@ hud:
     winter: BLUE
 visual:
   enabled: true
+  # 换季后是否让客户端重发周边区块以刷新视觉
   resend-on-season-change: true
-  # 换季刷新每 tick 最多处理的区块数，避免一次性刷新阻塞主线程。
+  # 换季刷新每 tick 最多处理的区块数，避免一次性刷新阻塞主线程
   refresh-batch-size: 64
+  # 不在这些世界应用季节视觉
   disabled-worlds: []
-  # 每季映射为客户端显示的 biome；实际世界 biome 不会改变。
+  # 每季映射为客户端显示的 biome；实际世界 biome 不会改变
   mappings:
     spring: PLAINS
     summer: JUNGLE
     autumn: WINDSWEPT_FOREST
     winter: SNOWY_PLAINS
+  # 秋叶视觉：把橡树/白桦/云杉叶显示为金合欢叶（仅客户端显示，真实方块不变）
+  foliage:
+    enabled: true
+    # 只在列出的季节替换显示，留空默认仅 AUTUMN
+    seasons: [AUTUMN]
+    mappings:
+      OAK_LEAVES: ACACIA_LEAVES
+      BIRCH_LEAVES: ACACIA_LEAVES
+      SPRUCE_LEAVES: ACACIA_LEAVES
+  # 季节植被显示替换：把已存在的植被方块在指定季节显示为替代方块
+  # 说明：仅发包视觉无法新增/移除方块（会与服务端真实方块不一致），只做显示替换；
+  # 换季时自动重发周边区块刷新显示，破坏方块仍获得真实掉落
+  flora:
+    enabled: true
+    seasons:
+      # 未列出的季节不替换
+      autumn:
+        DANDELION: DEAD_BUSH
+        POPPY: DEAD_BUSH
+        CORNFLOWER: DEAD_BUSH
+        OXEYE_DAISY: DEAD_BUSH
+        AZURE_BLUET: DEAD_BUSH
+        ALLIUM: DEAD_BUSH
+        FERN: DEAD_BUSH
+      winter:
+        DANDELION: DEAD_BUSH
+        POPPY: DEAD_BUSH
+        CORNFLOWER: DEAD_BUSH
+        OXEYE_DAISY: DEAD_BUSH
+        AZURE_BLUET: DEAD_BUSH
+        ALLIUM: DEAD_BUSH
+        FERN: DEAD_BUSH
+# 季节粒子：在每个玩家客户端本地生成，不写世界
+particles:
+  enabled: true
+  seasons:
+    # density = 每秒每玩家粒子数 × 100（0.06 ≈ 每玩家每秒 6 个）；radius 为生成半径（格）
+    spring: { enabled: true, particle: HAPPY_VILLAGER, density: 0.03, radius: 10 }
+    summer: { enabled: false, particle: FLAME, density: 0.03, radius: 10 }
+    autumn: { enabled: true, particle: SMOKE, density: 0.04, radius: 10 }
+    winter: { enabled: true, particle: SNOWFLAKE, density: 0.06, radius: 12 }
 migration:
-  # 仅在名单世界出生点水平半径内扫描，并在主线程安全传送名单动物。
   enabled: true
-  # 全局配置热载会取消旧任务，并按新周期重建单一迁徙任务。
-  period-seconds: 300
-  radius: 32
-  max-entities: 24
-  # 每次迁徙的随机水平位移范围（方块）。
-  min-distance: 8
-  max-distance: 16
-  worlds: [world]
-  animals: [COW, SHEEP, PIG, CHICKEN]
+  # 周期（秒）
+  interval-seconds: 45
+  # 单轮最多移送动物数
+  per-cycle: 20
+  # 出生点半径（格）
+  radius: 260
+  # 移送目标与出生点的最小距离（格），避免刚移走又判为离群
+  min-distance: 40
+  # 移送目标与出生点的最大距离（格）
+  max-distance: 80
+  # 名单世界为空时视为全部世界
+  worlds: []
+  animals: [CHICKEN, COW, PIG, SHEEP, HORSE, RABBIT, GOAT]
 villagers:
-  # 村民生成时按当前季节设置外观类型；visual.disabled-worlds 同时作为禁用世界名单。
+  # 生成村民时按季节设置外观类型，冬季/早春概率低生物群系外观
   enabled: true
-# 键格式为「年份-季内日」，值为 season.special_day 的 target 联动标识。
+# 特别日子名单：命中时发布 season.special_day 事件，键为「年-日」，值为主创约定标识
 special-days: {}
 messages:
-  menu-title: "季节菜单"
-  command:
-    permission: "你没有使用季节命令的权限。"
-    usage: "用法：/ccseason [menu|info|hud|guide|clock|set]"
-    help: "季节：查看状态、切换 HUD、获取指南与时钟。"
+  menu-title: "<gold>季节菜单</gold>"
   guide-title: "季节指南"
-  # 每项为指南书的一页，支持 MiniMessage；空列表时生成无正文的指南书。
+  # 每项为指南书的一页，支持 MiniMessage；空列表时生成无正文的指南书
   guide-lines:
     - "<gold>季节指南</gold>"
-    - "<gray>春夏秋冬随日历轮转。</gray>"
+    - "<gray>春夏秋冬随日历轮转，囤货与出游留意季节。</gray>"
+  # 命令反馈：全部支持 MiniMessage；缺失时回退内置默认文案
+  command:
+    permission: "<red>你没有使用季节命令的权限。</red>"
+    usage: "<gray>用法：/ccseason [menu|info|hud|guide|clock|set]</gray>"
+    info: "<gold>第%year%年 %season% 第%day%天</gold>"
+    players-only: "<red>该操作只能由玩家执行。</red>"
+    menu-players-only: "<red>季节菜单只能由玩家打开。</red>"
+    no-permission: "<red>你没有权限。</red>"
+    set-usage: "<gray>用法：/ccseason set season|day <值></gray>"
+    day-range: "<red>日期必须在 1 到 %days% 之间。</red>"
+    day-set: "<green>季节日期已调整。</green>"
+    day-invalid: "<red>日期必须是数字。</red>"
+    season-set: "<green>季节已调整。</green>"
+    season-invalid: "<red>季节必须是 spring、summer、autumn 或 winter。</red>"
+    hud-on: "<green>季节 HUD 已开启。</green>"
+    hud-off: "<yellow>季节 HUD 已关闭。</yellow>"
+  # 菜单按钮文案（支持 MiniMessage）
+  gui:
+    status: "季节状态"
+    status-lore: "<gray>第%year%年 · %season% · 第%day%天</gray>"
+    hud: "切换 HUD"
+    hud-lore: "点击切换季节 HUD"
+    guide: "季节指南"
+    guide-lore: "获得当前季节指南"
+    clock: "季节时钟"
+    clock-lore: "获得当前季节时钟"
+    close: "关闭"

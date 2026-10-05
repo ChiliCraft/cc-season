@@ -2,8 +2,6 @@ package com.chilicraft.season;
 
 import com.chilicraft.api.ModuleCommandExecutor;
 import com.chilicraft.api.ModuleTabCompleter;
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -44,12 +42,12 @@ final class SeasonCommand implements CommandExecutor, TabCompleter, ModuleComman
     @Override
     public boolean execute(CommandSender sender, String[] args) {
         if (!sender.hasPermission(USE_PERMISSION) && !isAdmin(sender)) {
-            sender.sendMessage("你没有使用季节命令的权限。");
+            send(sender, "command.permission", "你没有使用季节命令的权限。");
             return true;
         }
         if (args.length == 0 || args[0].equalsIgnoreCase("menu")) {
             if (sender instanceof Player player) gui.open(player);
-            else sender.sendMessage("季节菜单只能由玩家打开。");
+            else send(sender, "command.menu-players-only", "季节菜单只能由玩家打开。");
             return true;
         }
         if (args[0].equalsIgnoreCase("info")) {
@@ -57,7 +55,7 @@ final class SeasonCommand implements CommandExecutor, TabCompleter, ModuleComman
             return true;
         }
         if (!(sender instanceof Player player)) {
-            sender.sendMessage("该操作只能由玩家执行。");
+            send(sender, "command.players-only", "该操作只能由玩家执行。");
             return true;
         }
         if (args[0].equalsIgnoreCase("hud")) {
@@ -73,67 +71,72 @@ final class SeasonCommand implements CommandExecutor, TabCompleter, ModuleComman
             return true;
         }
         if (args[0].equalsIgnoreCase("set")) return setDate(player, args);
-        usage(player);
+        send(sender, "command.usage", "用法：/ccseason [menu|info|hud|guide|clock|set]");
         return true;
+    }
+
+    /** 发送 messages 段消息：缺失回退默认文案，MiniMessage 解析失败回退纯文本。 */
+    private void send(CommandSender sender, String key, String fallback, String... placeholders) {
+        sender.sendMessage(SeasonMessages.render(settings, key, fallback, placeholders));
     }
 
     private void sendInfo(CommandSender sender) {
         SeasonService.CalendarState state = service.state();
-        sender.sendMessage(Component.text("第" + state.year() + "年 "
-                + state.season().name().toLowerCase(Locale.ROOT) + " 第" + state.day() + "天", NamedTextColor.GOLD));
+        send(sender, "command.info", "第%year%年 %season% 第%day%天",
+                "%year%", String.valueOf(state.year()),
+                "%season%", state.season().name().toLowerCase(Locale.ROOT),
+                "%day%", String.valueOf(state.day()));
     }
 
     private void toggleHud(Player player) {
-        if (hidden.remove(player.getUniqueId())) player.sendMessage("季节 HUD 已开启。");
-        else {
+        if (hidden.remove(player.getUniqueId())) {
+            send(player, "command.hud-on", "季节 HUD 已开启。");
+        } else {
             hidden.add(player.getUniqueId());
-            player.sendMessage("季节 HUD 已关闭。");
+            send(player, "command.hud-off", "季节 HUD 已关闭。");
         }
     }
 
     private boolean setDate(Player player, String[] args) {
         if (!isAdmin(player)) {
-            player.sendMessage("你没有权限。");
+            send(player, "command.no-permission", "你没有权限。");
             return true;
         }
         if (args.length < 3) {
-            player.sendMessage("用法：/ccseason set season|day <值>");
+            send(player, "command.set-usage", "用法：/ccseason set season|day <值>");
             return true;
         }
         if (args[1].equalsIgnoreCase("day")) {
             try {
                 int day = Integer.parseInt(args[2]);
                 if (day < 1 || day > settings.daysPerSeason) {
-                    player.sendMessage("日期必须在 1 到 " + settings.daysPerSeason + " 之间。");
+                    send(player, "command.day-range", "日期必须在 1 到 %days% 之间。",
+                            "%days%", String.valueOf(settings.daysPerSeason));
                     return true;
                 }
                 service.setDayFromCommand(day);
-                player.sendMessage("季节日期已调整。");
+                send(player, "command.day-set", "季节日期已调整。");
             } catch (NumberFormatException exception) {
-                player.sendMessage("日期必须是数字。");
+                send(player, "command.day-invalid", "日期必须是数字。");
             }
             return true;
         }
         if (args[1].equalsIgnoreCase("season")) {
             SeasonService.Season season = SeasonService.Season.parseOrNull(args[2]);
             if (season == null) {
-                player.sendMessage("季节必须是 spring、summer、autumn 或 winter。");
+                send(player, "command.season-invalid", "季节必须是 spring、summer、autumn 或 winter。");
                 return true;
             }
             service.setSeasonFromCommand(season);
-            player.sendMessage("季节已调整。");
+            send(player, "command.season-set", "季节已调整。");
             return true;
         }
-        player.sendMessage("用法：/ccseason set season|day <值>");
+        send(player, "command.set-usage", "用法：/ccseason set season|day <值>");
         return true;
     }
 
     private boolean isAdmin(CommandSender sender) {
         return sender.hasPermission(ADMIN_PERMISSION) || sender.hasPermission(LEGACY_ADMIN_PERMISSION);
-    }
-
-    private void usage(CommandSender sender) {
-        sender.sendMessage("用法：/ccseason [menu|info|hud|guide|clock|set]");
     }
 
     @Override

@@ -1,9 +1,32 @@
 # 季节作物配置：0 表示停止生长，0–1 按概率减速，1–2 有概率额外生长一级；温室可绕过限制
+# 说明：仅在此列出的作物生效；名单只控制「生长是否被阻止」，具体由 BlockGrowEvent 驱动
 crops:
   WHEAT: {spring: 1.20, summer: 1.00, autumn: 0.80, winter: 0.00}
   CARROTS: {spring: 1.15, summer: 1.00, autumn: 0.75, winter: 0.00}
   POTATOES: {spring: 1.10, summer: 1.00, autumn: 0.80, winter: 0.00}
   BEETROOTS: {spring: 1.00, summer: 0.90, autumn: 1.10, winter: 0.00}
+  TORCHFLOWER_CROP: {spring: 1.30, summer: 0.00, autumn: 0.00, winter: 0.00}
+  PITCHER_CROP: {spring: 1.10, summer: 0.90, autumn: 0.00, winter: 0.00}
+  MELON_STEM: {spring: 0.80, summer: 1.20, autumn: 0.70, winter: 0.00}
+  PUMPKIN_STEM: {spring: 0.90, summer: 0.90, autumn: 1.25, winter: 0.00}
+  SUGAR_CANE: {spring: 1.00, summer: 1.20, autumn: 0.80, winter: 0.00}
+  CACTUS: {spring: 0.60, summer: 1.20, autumn: 0.50, winter: 0.00}
+  BAMBOO: {spring: 1.20, summer: 1.10, autumn: 0.70, winter: 0.40}
+  SWEET_BERRY_BUSH: {spring: 1.15, summer: 0.80, autumn: 1.10, winter: 0.00}
+  NETHER_WART: {spring: 0.00, summer: 0.50, autumn: 1.00, winter: 1.00}
+  COCOA: {spring: 0.90, summer: 1.20, autumn: 0.90, winter: 0.00}
+# 生长修正：对上面 rates 的结果统一乘算（温室内的作物不参与修正）
+growth:
+  # 雨天生长率倍率，1.0 表示无加成
+  rain-growth-bonus: 1.0
+  # 作物当前季节没有配置条目时，仍允许原版生长的概率
+  off-season-growth-chance: 0.10
+  # 光照低于该值（0-15）按低光倍率折算
+  required-light: 4
+  low-light-multiplier: 0.70
+  # 无天空光照（地下）时的倍率
+  underground-multiplier: 0.80
 greenhouse:
   enabled: true
+  # 作物正上方连续玻璃层数
   glass-above: 3

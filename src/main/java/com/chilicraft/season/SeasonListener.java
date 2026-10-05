@@ -31,17 +31,38 @@ final class SeasonListener implements Listener {
             return;
         }
         String season = service.state().season().name().toLowerCase(Locale.ROOT);
-        Double rate = rates.get(season);
-        if (rate == null) {
+        Double base = rates.get(season);
+        if (base == null) {
             return;
         }
-        if (rate <= 0.0 || rate < 1.0 && Math.random() > rate) {
+        if (base <= 0.0) {
+            // 淡季：不直接判死刑，按 off-season-growth-chance 保留基础生长机会
+            event.setCancelled(!(settings.offSeasonChance > 0.0 && Math.random() < settings.offSeasonChance));
+            return;
+        }
+        double rate = base * growthFactor(event.getBlock());
+        if (rate < 1.0 && Math.random() > rate) {
             event.setCancelled(true);
             return;
         }
         if (rate > 1.0 && Math.random() < Math.min(1.0, rate - 1.0)) {
             growExtraStage(event);
         }
+    }
+
+    /** 雨天加成 + 光照/地下修正，全部来自 crops.yml growth 段。 */
+    private double growthFactor(Block block) {
+        double factor = 1.0;
+        if (block.getWorld().hasStorm()) {
+            factor *= settings.rainGrowthBonus;
+        }
+        int skyLight = block.getLightFromSky();
+        if (skyLight <= 0) {
+            factor *= settings.undergroundMultiplier;
+        } else if (skyLight < settings.requiredLight) {
+            factor *= settings.lowLightMultiplier;
+        }
+        return factor;
     }
 
     private void growExtraStage(BlockGrowEvent event) {

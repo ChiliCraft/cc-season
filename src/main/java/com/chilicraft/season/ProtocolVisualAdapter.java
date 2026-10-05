@@ -19,10 +19,12 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
-/** 使用 ProtocolLib 仅修改玩家收到的区块 biome palette，不改变服务器真实区块。 */
+/** 使用 ProtocolLib 仅修改玩家收到的区块 biome/block palette，不改变服务器真实区块。 */
 final class ProtocolVisualAdapter {
 
     private final ChiliSeasonPlugin plugin;
@@ -32,6 +34,8 @@ final class ProtocolVisualAdapter {
     private BukkitTask refreshTask;
     private boolean available;
     private final Map<String, Integer> biomeIds = new HashMap<>();
+    /** 每季方块状态 ID 映射（秋叶/植被显示替换），与 biome 重写随同一发发包。 */
+    private final Map<String, Map<Integer, Integer>> seasonBlocks = new HashMap<>();
     private final ArrayDeque<RefreshTarget> refreshQueue = new ArrayDeque<>();
     private long rewritten;
     private long skipped;
@@ -72,18 +76,18 @@ final class ProtocolVisualAdapter {
         if (settings.disabledWorlds.contains(world.getName())) {
             return;
         }
-        String biomeName = settings.visualBiomes.get(
-                service.state().season().name().toLowerCase(Locale.ROOT));
-        if (biomeName == null) {
-            skipped++;
-            return;
-        }
-        try {
-            Integer biomeId = biomeIds.get(biomeName);
-            if (biomeId == null || biomeId < 0) {
-                skipped++;
+        String season = service.state().season().name().toLowerCase(Locale.ROOT);
+        Map<Integer, Integer> blockMap = seasonBlocks.getOrDefault(season, Map.of());
+        String biomeName = settings.visualBiomes.get(season);
+        Integer biomeId = biomeName == null ? null : biomeIds.get(season);
+        if (biomeId == null || biomeId < 0) {
+            if (blockMap.isEmpty()) {
                 return;
             }
+            // biome 映射缺失时仍保留方块显示替换能力；-1 表示透传原 biome 容器
+            biomeId = -1;
+        }
+        try {
             StructureModifier<WrappedLevelChunkData.ChunkData> modifier =
                     event.getPacket().getLevelChunkData();
             if (modifier.size() == 0) {
@@ -91,7 +95,7 @@ final class ProtocolVisualAdapter {
                 return;
             }
             WrappedLevelChunkData.ChunkData data = modifier.read(0);
-            byte[] rewritten = rewriteSections(data.getBuffer(), world, biomeId);
+            byte[] rewritten = rewriteSections(data.getBuffer(), world, biomeId, blockMap);
             if (rewritten != null) {
                 data.setBuffer(rewritten);
                 modifier.write(0, data);
@@ -184,14 +188,18 @@ final class ProtocolVisualAdapter {
         throw new NoSuchMethodException("getId on " + type.getName());
     }
 
-    private byte[] rewriteSections(byte[] input, World world, int biomeId) throws IOException {
+    private byte[] rewriteSections(byte[] input, World world, int biomeId, Map<Integer, Integer> blockMap) throws IOException {
         ByteReader reader = new ByteReader(input);
         ByteArrayOutputStream output = new ByteArrayOutputStream(input.length);
         int sections = (world.getMaxHeight() - world.getMinHeight()) / 16;
         for (int section = 0; section < sections; section++) {
-            copyBlockContainer(reader, output);
-            skipBiomeContainer(reader);
-            writeSingleBiomeContainer(output, biomeId);
+            copyBlockContainer(reader, output, blockMap);
+            if (biomeId >= 0) {
+                skipBiomeContainer(reader);
+                writeSingleBiomeContainer(output, biomeId);
+            } else {
+                copyBiomeContainer(reader, output);
+            }
         }
         if (reader.remaining() != 0) {
             return null;
@@ -199,16 +207,55 @@ final class ProtocolVisualAdapter {
         return output.toByteArray();
     }
 
-    private void copyBlockContainer(ByteReader reader, ByteArrayOutputStream output) throws IOException {
+    private void copyBlockContainer(ByteReader reader, ByteArrayOutputStream output, Map<Integer, Integer> blockMap) throws IOException {
         int bits = reader.readUnsignedByte();
         output.write(bits);
+        if (bits == 0) {
+            // 单值容器（整段同一方块状态）：VarInt 状态 ID + 通常为空的长数组，无 palette 长度前缀
+            int single = reader.readVarInt();
+            writeVarInt(output, remap(single, blockMap));
+            int emptyLongs = reader.readVarInt();
+            writeVarInt(output, emptyLongs);
+            for (int i = 0; i < emptyLongs; i++) {
+                writeLong(output, reader.readLong());
+            }
+            return;
+        }
         int paletteBits = Math.max(4, bits);
-        if (bits == 0 || bits <= 8) {
+        if (bits <= 8) {
             int paletteSize = reader.readVarInt();
             writeVarInt(output, paletteSize);
             for (int i = 0; i < paletteSize; i++) {
-                writeVarInt(output, reader.readVarInt());
+                writeVarInt(output, remap(reader.readVarInt(), blockMap));
             }
+        } else if (bits <= Short.MAX_VALUE) {
+            // 全局调色板（bits > 8）：无 palette 段；数据条目按 valuesPerLong = 64/bits
+            // 逐 long 独立打包（不跨 long），逐个 long 原位重映射，数组长度不变
+            int longCount = reader.readVarInt();
+            writeVarInt(output, longCount);
+            if (blockMap.isEmpty()) {
+                for (int i = 0; i < longCount; i++) {
+                    writeLong(output, reader.readLong());
+                }
+                return;
+            }
+            int perLong = 64 / bits;
+            long mask = (1L << bits) - 1L;
+            for (int i = 0; i < longCount; i++) {
+                long packed = reader.readLong();
+                long rebuilt = 0L;
+                for (int entry = 0; entry < perLong; entry++) {
+                    int raw = (int) ((packed >>> (entry * bits)) & mask);
+                    int mapped = remap(raw, blockMap);
+                    if (mapped >= (1 << bits)) {
+                        // 目标 ID 超出位数上限，放弃该条目替换以保证发包合法
+                        mapped = raw;
+                    }
+                    rebuilt |= ((long) mapped) << (entry * bits);
+                }
+                writeLong(output, rebuilt);
+            }
+            return;
         }
         int longCount = reader.readVarInt();
         writeVarInt(output, longCount);
@@ -221,9 +268,55 @@ final class ProtocolVisualAdapter {
         }
     }
 
+    /** 方块状态 ID 显示重映射；空表或未命中时原样返回。 */
+    private int remap(int id, Map<Integer, Integer> blockMap) {
+        if (blockMap.isEmpty()) {
+            return id;
+        }
+        Integer mapped = blockMap.get(id);
+        return mapped == null ? id : mapped;
+    }
+
+    /** 透传复制 biome 容器（biome 映射缺失但启用了方块视觉时使用）。 */
+    private void copyBiomeContainer(ByteReader reader, ByteArrayOutputStream output) throws IOException {
+        int bits = reader.readUnsignedByte();
+        output.write(bits);
+        if (bits == 0) {
+            // 单值 biome：VarInt biome ID + 长数组，无 palette 长度前缀
+            writeVarInt(output, reader.readVarInt());
+            int emptyLongs = reader.readVarInt();
+            writeVarInt(output, emptyLongs);
+            for (int i = 0; i < emptyLongs; i++) {
+                writeLong(output, reader.readLong());
+            }
+            return;
+        }
+        if (bits <= 3) {
+            int paletteSize = reader.readVarInt();
+            writeVarInt(output, paletteSize);
+            for (int i = 0; i < paletteSize; i++) {
+                writeVarInt(output, reader.readVarInt());
+            }
+        }
+        int longCount = reader.readVarInt();
+        writeVarInt(output, longCount);
+        for (int i = 0; i < longCount; i++) {
+            writeLong(output, reader.readLong());
+        }
+    }
+
     private void skipBiomeContainer(ByteReader reader) throws IOException {
         int bits = reader.readUnsignedByte();
-        if (bits == 0 || bits <= 3) {
+        if (bits == 0) {
+            // 单值 biome：VarInt biome ID + 长数组，无 palette 长度前缀
+            reader.readVarInt();
+            int emptyLongs = reader.readVarInt();
+            for (int i = 0; i < emptyLongs; i++) {
+                reader.readLong();
+            }
+            return;
+        }
+        if (bits <= 3) {
             int paletteSize = reader.readVarInt();
             for (int i = 0; i < paletteSize; i++) {
                 reader.readVarInt();
@@ -257,6 +350,7 @@ final class ProtocolVisualAdapter {
 
     void reload() {
         biomeIds.clear();
+        seasonBlocks.clear();
         if (!available || !settings.visualEnabled) {
             return;
         }
@@ -268,6 +362,41 @@ final class ProtocolVisualAdapter {
                 plugin.getLogger().log(java.util.logging.Level.WARNING,
                         "无法缓存 biome registry ID：" + biomeName, exception);
             }
+        }
+        buildSeasonBlocks();
+    }
+
+    /**
+     * 构建每季方块状态 ID 映射（秋叶/植被显示替换）。
+     * 反射失败返回空映射，对应季节方块视觉自动跳过，不影响 biome 视觉。
+     */
+    private void buildSeasonBlocks() {
+        Set<String> seasons = new HashSet<>();
+        if (settings.floraEnabled) {
+            seasons.addAll(settings.floraSeasons.keySet());
+        }
+        if (settings.foliageEnabled) {
+            seasons.addAll(settings.foliageSeasons);
+        }
+        for (String season : seasons) {
+            Map<String, String> materials = new HashMap<>();
+            if (settings.floraEnabled) {
+                materials.putAll(settings.floraSeasons.getOrDefault(season, Map.of()));
+            }
+            if (settings.foliageEnabled && settings.foliageSeasons.contains(season)) {
+                // 同名源材料以秋叶映射为准
+                materials.putAll(settings.foliageMap);
+            }
+            if (materials.isEmpty()) {
+                continue;
+            }
+            Map<Integer, Integer> ids = SeasonBlockPaletteMapper.build(plugin, materials);
+            if (!ids.isEmpty()) {
+                seasonBlocks.put(season, ids);
+            }
+        }
+        if (!seasonBlocks.isEmpty()) {
+            plugin.getLogger().info("季节方块视觉（秋叶/植被显示替换）已启用：" + seasonBlocks.keySet());
         }
     }
 
@@ -329,6 +458,7 @@ final class ProtocolVisualAdapter {
         }
         available = false;
         biomeIds.clear();
+        seasonBlocks.clear();
     }
 
     private record RefreshTarget(World world, int x, int z) {
