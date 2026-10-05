@@ -1,5 +1,6 @@
 package com.chilicraft.season;
 
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
@@ -13,6 +14,7 @@ import org.bukkit.entity.Player;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -29,6 +31,13 @@ final class SeasonTask implements Runnable {
         THUNDER
     }
 
+    /** 逐玩家 HUD 模式：FIXED 固定显示 / VARIABLE 名单显示 / OFF 隐藏。 */
+    private enum HudMode {
+        FIXED,
+        VARIABLE,
+        OFF
+    }
+
     private static final MiniMessage MINI = MiniMessage.miniMessage();
     private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.legacySection();
     /** 粒子采样时相对玩家的垂直扰动上限，避免读取未加载区块。 */
@@ -39,7 +48,15 @@ final class SeasonTask implements Runnable {
     private final SeasonService service;
     private final BossBar bar;
     private final Set<UUID> hidden;
+    /** 每位玩家最近一次发送的 ActionBar 文本，用于 VARIABLE 模式的标题变更检测。 */
+    private final Map<UUID, String> lastActionbarText = new HashMap<>();
+    /** ActionBar 当前可见玩家，隐藏切换时据此只清一次栏。 */
+    private final Set<UUID> actionbarShown = new HashSet<>();
     private int weatherTicks;
+    /** 手动天气豁免：监听器捕获手动改天命令后置位，跳过下一次自动排期。 */
+    private boolean manualOverride;
+    /** 上一次见到的日序，跨日时重置手动豁免（新的一天按新计划执行）。 */
+    private int lastSeenDay = -1;
     /** 本季（本年）逐日天气计划：季次日 -> 天气。随换季 / 配置版本变化重建。 */
     private Map<Integer, DayWeather> dayPlan = Map.of();
     private String planSeason;
@@ -59,6 +76,11 @@ final class SeasonTask implements Runnable {
     @Override
     public void run() {
         service.tick();
+        int day = service.state().day();
+        if (day != lastSeenDay) {
+            lastSeenDay = day;
+            manualOverride = false;
+        }
         if (settings.weatherEnabled) {
             refreshWeatherPlan();
             weatherTicks++;
@@ -78,6 +100,7 @@ final class SeasonTask implements Runnable {
     private void updateHud() {
         if (!settings.hudEnabled) {
             bar.removeAll();
+            clearActionbars();
             return;
         }
         SeasonService.CalendarState state = service.state();
@@ -96,15 +119,78 @@ final class SeasonTask implements Runnable {
                 (double) state.day() / settings.daysPerSeason)));
         for (Player player : Bukkit.getOnlinePlayers()) {
             try {
-                if (hidden.contains(player.getUniqueId())) {
+                HudMode mode = modeOf(player.getUniqueId());
+                if (mode == HudMode.OFF) {
                     bar.removePlayer(player);
                 } else {
                     bar.addPlayer(player);
                 }
+                updateActionbar(player, title, mode);
             } catch (RuntimeException exception) {
                 plugin.getLogger().warning("HUD 更新失败：" + exception.getMessage());
             }
         }
+    }
+
+    /** 逐玩家模式裁决：个人隐藏（/ccseason hud）> off-players 名单 > variable-players 名单 > 默认模式。 */
+    private HudMode modeOf(UUID playerId) {
+        if (hidden.contains(playerId) || settings.hudOffPlayers.contains(playerId)) {
+            return HudMode.OFF;
+        }
+        if (settings.hudVariablePlayers.contains(playerId)) {
+            return HudMode.VARIABLE;
+        }
+        return switch (settings.hudDefaultMode) {
+            case "VARIABLE" -> HudMode.VARIABLE;
+            case "OFF" -> HudMode.OFF;
+            default -> HudMode.FIXED;
+        };
+    }
+
+    /**
+     * ActionBar 策略：FIXED 每周期重发保持常显；VARIABLE 仅在标题变化时发一次
+     * （显示数秒后自然淡出）；OFF 时按 clear-on-hide 决定是否清栏，只清一次。
+     */
+    private void updateActionbar(Player player, String title, HudMode mode) {
+        if (!settings.hudActionBarEnabled) {
+            return;
+        }
+        UUID playerId = player.getUniqueId();
+        if (mode == HudMode.OFF) {
+            if (actionbarShown.remove(playerId)) {
+                lastActionbarText.remove(playerId);
+                if (settings.hudActionBarClearOnHide) {
+                    player.sendActionBar(Component.empty());
+                }
+            }
+            return;
+        }
+        if (mode == HudMode.VARIABLE && title.equals(lastActionbarText.get(playerId))) {
+            return;
+        }
+        Component text;
+        try {
+            text = MINI.deserialize(title);
+        } catch (RuntimeException exception) {
+            text = Component.text(title);
+        }
+        player.sendActionBar(text);
+        lastActionbarText.put(playerId, title);
+        actionbarShown.add(playerId);
+    }
+
+    /** HUD 整体关闭或插件禁用时清空 ActionBar 缓存，并按配置清一次可见栏。 */
+    private void clearActionbars() {
+        if (settings.hudActionBarClearOnHide) {
+            for (UUID playerId : actionbarShown) {
+                Player player = Bukkit.getPlayer(playerId);
+                if (player != null) {
+                    player.sendActionBar(Component.empty());
+                }
+            }
+        }
+        actionbarShown.clear();
+        lastActionbarText.clear();
     }
 
     private BarColor colorOf(SeasonService.Season season) {
@@ -167,14 +253,30 @@ final class SeasonTask implements Runnable {
         planVersion = settings.version;
     }
 
-    /** 周期性套用当日计划天气；计划尚未构建（首日以前）时视为晴天。 */
+    /**
+     * 监听器捕获到玩家 / 控制台 / 命令方块手动改天（weather、toggledownfall）时调用：
+     * 跳过下一次自动排期，尊重管理员手动操作，之后的周期恢复按计划覆盖。
+     */
+    void markManualWeather() {
+        manualOverride = true;
+    }
+
+    /** 周期性套用当日计划天气；手动豁免时跳过一次；计划尚未构建（首日以前）时不动。 */
     private void applyWeather() {
         if (dayPlan.isEmpty()) {
+            return;
+        }
+        if (manualOverride) {
+            manualOverride = false;
             return;
         }
         DayWeather today = dayPlan.getOrDefault(service.state().day(), DayWeather.CLEAR);
         boolean storm = today != DayWeather.CLEAR;
         boolean thundering = today == DayWeather.THUNDER;
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        int duration = storm
+                ? random.nextInt(settings.stormMinTicks, settings.stormMaxTicks + 1)
+                : random.nextInt(settings.clearMinTicks, settings.clearMaxTicks + 1);
         for (World world : Bukkit.getWorlds()) {
             if (settings.weatherDisabledWorlds.contains(world.getName())) {
                 continue;
@@ -183,6 +285,8 @@ final class SeasonTask implements Runnable {
                 world.setStorm(storm);
                 world.setThundering(thundering);
             }
+            // 晴天时该值即距下次自然变天的时间，雨天时为剩余雨时，均实现「时长区间」
+            world.setWeatherDuration(duration);
         }
     }
 
@@ -244,6 +348,7 @@ final class SeasonTask implements Runnable {
 
     void clear() {
         bar.removeAll();
+        clearActionbars();
         dayPlan = Map.of();
         planSeason = null;
         planVersion = -1L;

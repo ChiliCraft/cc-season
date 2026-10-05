@@ -26,6 +26,8 @@ final class SeasonSettings {
     boolean requirePlayers = false;
     int maxCatchup = 2;
     String overworld = "world";
+    /** 参考世界：排期天气、计时都以它为准；空串回退 overworld。 */
+    String timeAnchorWorld = "";
     int startYear = 1;
     int startDay = 1;
     SeasonService.Season startSeason = SeasonService.Season.SPRING;
@@ -40,6 +42,24 @@ final class SeasonSettings {
     int migrationMaxDistance = 80;
     Set<String> migrationWorlds = Set.of();
     Set<String> animals = Set.of();
+    /** 迁徙成功时播放落点粒子。 */
+    boolean migrationParticles = true;
+    /** 按季生成加成概率：季节 → 概率（对 boost-animals 名单内实体生效）。 */
+    Map<String, Double> spawnBoostChances = Map.of();
+    /** 按季生成加成名单：季节 → 实体类型名。 */
+    Map<String, Set<String>> boostAnimals = Map.of();
+    /** 暖气候动物（冬季被软淘汰 / soft despawn）。 */
+    Set<String> warmAnimals = Set.of();
+    /** 冷气候动物（软淘汰永不清）。 */
+    Set<String> coldAnimals = Set.of();
+    /** 冬季暖气候动物软淘汰概率（自然生成时取消）。 */
+    double softDespawnChance = 0.25;
+    /** 入冬后前 N 天（冬季 day ≤ N）以玩家为中心按渐增半径软清理暖气候动物。 */
+    boolean winterCleanupEnabled = true;
+    int winterCleanupDays = 3;
+    int winterCleanupBaseRadius = 64;
+    int winterCleanupRadiusStep = 64;
+    int winterCleanupMaxPerCycle = 40;
 
     // 天气排期（按季排雨天数 + 雷暴概率，替代每次随机掷阈）
     boolean weatherEnabled = true;
@@ -47,11 +67,27 @@ final class SeasonSettings {
     int rainyDaysDefault = 5;
     double thunderChance = 0.2;
     Set<String> weatherDisabledWorlds = Set.of();
+    /** 雷暴时长区间（tick），排到雷暴日时随机取。 */
+    int stormMinTicks = 6000;
+    int stormMaxTicks = 18000;
+    /** 晴天时长区间（tick）。 */
+    int clearMinTicks = 6000;
+    int clearMaxTicks = 24000;
+    /** 尊重手动 /weather：手动切天气后跳过下一次自动排期，下一周期恢复。 */
+    boolean respectManualCommands = true;
 
     // HUD
     boolean hudEnabled = true;
     String hudTitle = "";
     Map<String, String> hudColors = Map.of();
+    /** 默认 HUD 模式：FIXED 固定显示 / VARIABLE 按玩家名单 / OFF。 */
+    String hudDefaultMode = "FIXED";
+    /** ActionBar 输出 HUD 的开关与隐藏时是否清栏。 */
+    boolean hudActionBarEnabled = false;
+    boolean hudActionBarClearOnHide = false;
+    /** VARIABLE 名单：可见玩家与关闭玩家的 UUID。 */
+    Set<java.util.UUID> hudVariablePlayers = Set.of();
+    Set<java.util.UUID> hudOffPlayers = Set.of();
 
     // 季节视觉（仅发包，不修改真实 biome/方块）
     boolean visualEnabled = true;
@@ -66,6 +102,18 @@ final class SeasonSettings {
     // 季节植被显示替换：季节 →（源材料 → 目标材料）
     boolean floraEnabled = true;
     Map<String, Map<String, String>> floraSeasons = Map.of();
+    /** 海洋 biome 显示映射：季节 → biome 名（按 chunk 内 ocean/river 段细分）。 */
+    boolean oceansEnabled = true;
+    Map<String, String> oceanSeasons = Map.of();
+    boolean affectRivers = true;
+    boolean affectShores = true;
+    boolean keepDeepVariants = true;
+    /** 河流 biome 显示映射：季节 → biome 名。 */
+    boolean riversEnabled = true;
+    Map<String, String> riverSeasons = Map.of();
+    /** 换季过渡平滑：每 tick 推进的显示比例（0.05-0.5），0 表示一次性全量刷新。 */
+    double ease = 0.0;
+    int easeTicks = 5;
 
     // 季节粒子（客户端本地生成，不写世界）
     boolean particlesEnabled = true;
@@ -74,18 +122,54 @@ final class SeasonSettings {
     // 作物与生长修正
     Map<String, Map<String, Double>> cropRates = Map.of();
     boolean greenhouseEnabled = true;
-    int greenhouseAbove = 3;
+    /** 温室判定：水平半径内玻璃数量 >= minGlassCount。 */
+    int greenhouseRadius = 7;
+    int greenhouseMinGlass = 16;
+    /** 玻璃搜索的最大层高。 */
+    int greenhouseMaxRoof = 4;
+    /** 可计入的玻璃类型（材料名小写）。 */
+    Set<String> greenhouseGlassTypes = Set.of("glass", "white_stained_glass", "light_blue_stained_glass");
+    /** 需要作物下方放置核心方块时，核心材料名。 */
+    boolean greenhouseCoreRequired = false;
+    String greenhouseCoreBlock = "glass";
+    /** 温室内冬季生长倍率。 */
+    double greenhouseWinterBonus = 1.0;
+    /** 调试棒：手持右键显示温室统计信息。 */
+    String greenhouseDebugStick = "stick";
+    /** 雨天生长加成（growth.rain-growth-bonus）。 */
     double rainGrowthBonus = 1.0;
-    double offSeasonChance = 0.1;
+    /** 淡季基础生长概率（growth.off-season-growth-chance）。 */
+    double offSeasonChance = 0.10;
+    /** 生长所需最低天空光照（growth.required-light）。 */
     int requiredLight = 4;
-    double lowLightMultiplier = 0.7;
-    double undergroundMultiplier = 0.8;
+    /** 低光照倍率（growth.low-light-multiplier）。 */
+    double lowLightMultiplier = 0.70;
+    /** 地下倍率（growth.underground-multiplier）。 */
+    double undergroundMultiplier = 0.80;
 
     // 村民季节外观
     boolean villagerEnabled = true;
 
+    // 落叶快速腐烂（FastLeafDecay）：仅加速"已悬空"的树叶
+    boolean fastLeafDecayEnabled = false;
+    int fastLeafDecayRadius = 6;
+    double fastLeafDecayChance = 0.8;
+    int fastLeafDecayDelay = 5;
+
+    // 刷怪季相守卫：禁止在被伪装成丛林之外的自然 biome 刷出豹猫等
+    boolean spawnGuardEnabled = true;
+
+    // 季节事件测试命令（发布 calendar 事件用）开关
+    boolean eventCommandEnabled = true;
+
     // 指南书与消息
     List<String> guideLines = List.of();
+    /** 首次进服自动发放指南书。 */
+    boolean guideOnFirstJoin = true;
+    // 作物图鉴 lore：messages.crop-lore 段
+    boolean cropLoreEnabled = true;
+    // 季节展示名（crop-lore.season-names），键 spring/summer/autumn/winter
+    Map<String, String> cropLoreSeasonNames = Map.of();
     // messages 段：含嵌套键（如 command.hud-on），缺失时返回空串
     Map<String, String> messages = Map.of();
 
@@ -120,6 +204,10 @@ final class SeasonSettings {
         this.requirePlayers = config.getBoolean("calendar.require-players", false);
         this.maxCatchup = nonNegative(config.getInt("calendar.max-catchup", 2), 2, "calendar.max-catchup");
         this.overworld = config.getString("calendar.overworld", "world");
+        this.timeAnchorWorld = config.getString("calendar.time-anchor-world", "");
+        if (this.timeAnchorWorld == null || this.timeAnchorWorld.isBlank()) {
+            this.timeAnchorWorld = this.overworld;
+        }
         this.startYear = Math.max(1, config.getInt("calendar.start-year", 1));
         this.startDay = clampInt(config.getInt("calendar.start-day", 1), 1, this.daysPerSeason, 1, "calendar.start-day");
         this.startSeason = parseSeason(config.getString("calendar.start-season", "spring"), SeasonService.Season.SPRING);
@@ -128,6 +216,13 @@ final class SeasonSettings {
         this.rainyDays = loadDayCounts(config.getConfigurationSection("weather.rainy-days"));
         this.rainyDaysDefault = nonNegative(config.getInt("weather.rainy-days-per-season", 5), 5, "weather.rainy-days-per-season");
         this.thunderChance = ratio(config.getDouble("weather.thunder-chance", 0.2), 0.2, "weather.thunder-chance");
+        this.stormMinTicks = positive(config.getInt("weather.storm-duration-ticks.min", 6000), 6000, "weather.storm-duration-ticks.min");
+        this.stormMaxTicks = Math.max(this.stormMinTicks,
+                positive(config.getInt("weather.storm-duration-ticks.max", 18000), 18000, "weather.storm-duration-ticks.max"));
+        this.clearMinTicks = positive(config.getInt("weather.clear-duration-ticks.min", 6000), 6000, "weather.clear-duration-ticks.min");
+        this.clearMaxTicks = Math.max(this.clearMinTicks,
+                positive(config.getInt("weather.clear-duration-ticks.max", 24000), 24000, "weather.clear-duration-ticks.max"));
+        this.respectManualCommands = config.getBoolean("weather.respect-manual-commands", true);
         this.weatherDisabledWorlds = Set.copyOf(config.getStringList("weather.disabled-worlds"));
         this.migrationEnabled = config.getBoolean("migration.enabled", true);
         this.migrationPeriod = positive(config.getInt("migration.interval-seconds", 45), 45, "migration.interval-seconds");
@@ -137,6 +232,22 @@ final class SeasonSettings {
         this.migrationMaxDistance = nonNegative(config.getInt("migration.max-distance", 80), 80, "migration.max-distance");
         this.migrationWorlds = Set.copyOf(config.getStringList("migration.worlds"));
         this.animals = Set.copyOf(config.getStringList("migration.animals"));
+        this.migrationParticles = config.getBoolean("migration.particles", true);
+        this.spawnBoostChances = loadSeasonDoubles(config.getConfigurationSection("migration.spawn-boost"));
+        this.boostAnimals = loadSeasonSets(config.getConfigurationSection("migration.boost-animals"));
+        this.warmAnimals = Set.copyOf(config.getStringList("migration.warm-animals"));
+        this.coldAnimals = Set.copyOf(config.getStringList("migration.cold-animals"));
+        this.softDespawnChance = ratio(config.getDouble("migration.soft-despawn-chance", 0.25), 0.25, "migration.soft-despawn-chance");
+        this.winterCleanupEnabled = config.getBoolean("migration.winter-cleanup.enabled", true);
+        this.winterCleanupDays = positive(config.getInt("migration.winter-cleanup.days", 3), 3, "migration.winter-cleanup.days");
+        this.winterCleanupBaseRadius = positive(config.getInt("migration.winter-cleanup.base-radius", 64), 64, "migration.winter-cleanup.base-radius");
+        this.winterCleanupRadiusStep = nonNegative(config.getInt("migration.winter-cleanup.radius-step", 64), 64, "migration.winter-cleanup.radius-step");
+        this.winterCleanupMaxPerCycle = positive(config.getInt("migration.winter-cleanup.max-per-cycle", 40), 40, "migration.winter-cleanup.max-per-cycle");
+        this.hudDefaultMode = parseHudMode(config.getString("hud.default-mode", "FIXED"));
+        this.hudActionBarEnabled = config.getBoolean("hud.actionbar.enabled", false);
+        this.hudActionBarClearOnHide = config.getBoolean("hud.actionbar.clear-on-hide", false);
+        this.hudVariablePlayers = loadUuids(config.getStringList("hud.variable-players"));
+        this.hudOffPlayers = loadUuids(config.getStringList("hud.off-players"));
         this.hudEnabled = config.getBoolean("hud.enabled", true);
         this.hudTitle = config.getString("hud.title", "");
         this.hudColors = loadStrings(config.getConfigurationSection("hud.colors"));
@@ -151,10 +262,31 @@ final class SeasonSettings {
         this.foliageMap = loadMaterials(config.getConfigurationSection("visual.foliage.mappings"));
         this.floraEnabled = config.getBoolean("visual.flora.enabled", true);
         this.floraSeasons = loadSubstitutions(config.getConfigurationSection("visual.flora.seasons"));
+        this.oceansEnabled = config.getBoolean("visual.oceans.enabled", true);
+        this.oceanSeasons = loadVisuals(config.getConfigurationSection("visual.oceans.seasons"));
+        this.affectRivers = config.getBoolean("visual.oceans.affect-rivers", true);
+        this.affectShores = config.getBoolean("visual.oceans.affect-shores", true);
+        this.keepDeepVariants = config.getBoolean("visual.oceans.keep-deep-variants", true);
+        this.riversEnabled = config.getBoolean("visual.rivers.enabled", true);
+        this.riverSeasons = loadVisuals(config.getConfigurationSection("visual.rivers.seasons"));
+        this.ease = ratio(config.getDouble("visual.ease.ease", 0.20), 0.20, "visual.ease.ease");
+        if (this.ease > 0.5) {
+            this.ease = 0.5;
+        }
+        this.easeTicks = positive(config.getInt("visual.ease.ticks-per-step", 5), 5, "visual.ease.ticks-per-step");
         this.particlesEnabled = config.getBoolean("particles.enabled", true);
         this.particleRules = loadParticles(config.getConfigurationSection("particles.seasons"));
         this.villagerEnabled = config.getBoolean("villagers.enabled", true);
+        this.fastLeafDecayEnabled = config.getBoolean("fast-leaf-decay.enabled", false);
+        this.fastLeafDecayRadius = clampInt(config.getInt("fast-leaf-decay.radius", 6), 1, 16, 6, "fast-leaf-decay.radius");
+        this.fastLeafDecayChance = ratio(config.getDouble("fast-leaf-decay.chance", 0.8), 0.8, "fast-leaf-decay.chance");
+        this.fastLeafDecayDelay = nonNegative(config.getInt("fast-leaf-decay.delay-ticks", 5), 5, "fast-leaf-decay.delay-ticks");
+        this.spawnGuardEnabled = config.getBoolean("spawn-guard.enabled", true);
+        this.eventCommandEnabled = config.getBoolean("event-command.enabled", true);
+        this.guideOnFirstJoin = config.getBoolean("messages.guide-on-first-join", true);
         this.guideLines = List.copyOf(config.getStringList("messages.guide-lines"));
+        this.cropLoreEnabled = config.getBoolean("messages.crop-lore.enabled", true);
+        this.cropLoreSeasonNames = loadStrings(config.getConfigurationSection("messages.crop-lore.season-names"));
         this.messages = loadStrings(config.getConfigurationSection("messages"));
     }
 
@@ -163,12 +295,86 @@ final class SeasonSettings {
         this.version++;
         this.cropRates = loadWeights(crops);
         this.greenhouseEnabled = crops.getBoolean("greenhouse.enabled", true);
-        this.greenhouseAbove = nonNegative(crops.getInt("greenhouse.glass-above", 3), 3, "greenhouse.glass-above");
+        this.greenhouseRadius = clampInt(crops.getInt("greenhouse.radius", 7), 1, 32, 7, "greenhouse.radius");
+        this.greenhouseMinGlass = nonNegative(crops.getInt("greenhouse.min-glass-count", 16), 16, "greenhouse.min-glass-count");
+        this.greenhouseMaxRoof = positive(crops.getInt("greenhouse.max-roof-height", 4), 4, "greenhouse.max-roof-height");
+        this.greenhouseCoreRequired = crops.getBoolean("greenhouse.require-core", false);
+        String coreBlock = String.valueOf(crops.get("greenhouse.core-block", "glass")).toLowerCase(Locale.ROOT);
+        this.greenhouseCoreBlock = Material.matchMaterial(coreBlock) != null ? coreBlock : "glass";
+        this.greenhouseWinterBonus = ratio(crops.getDouble("greenhouse.winter-bonus", 1.0), 1.0, "greenhouse.winter-bonus");
+        this.greenhouseDebugStick = String.valueOf(crops.get("greenhouse.debug.stick", "stick")).toLowerCase(Locale.ROOT);
+        Set<String> glassTypes = new java.util.LinkedHashSet<>();
+        for (String entry : crops.getStringList("greenhouse.block-types")) {
+            String name = entry.toLowerCase(Locale.ROOT);
+            if (Material.matchMaterial(name) == null) {
+                plugin.getLogger().warning("crops.yml greenhouse.block-types 存在未知材料：" + entry + "，已跳过。");
+                continue;
+            }
+            glassTypes.add(name);
+        }
+        this.greenhouseGlassTypes = glassTypes.isEmpty()
+                ? Set.of("glass", "white_stained_glass", "light_blue_stained_glass")
+                : Set.copyOf(glassTypes);
         this.rainGrowthBonus = ratio(crops.getDouble("growth.rain-growth-bonus", 1.0), 1.0, "growth.rain-growth-bonus");
         this.offSeasonChance = ratio(crops.getDouble("growth.off-season-growth-chance", 0.10), 0.10, "growth.off-season-growth-chance");
         this.requiredLight = clampInt(crops.getInt("growth.required-light", 4), 0, 15, 4, "growth.required-light");
         this.lowLightMultiplier = ratio(crops.getDouble("growth.low-light-multiplier", 0.70), 0.70, "growth.low-light-multiplier");
         this.undergroundMultiplier = ratio(crops.getDouble("growth.underground-multiplier", 0.80), 0.80, "growth.underground-multiplier");
+    }
+
+    private String parseHudMode(String raw) {
+        String mode = String.valueOf(raw).trim().toUpperCase(Locale.ROOT);
+        return switch (mode) {
+            case "FIXED", "VARIABLE", "OFF" -> mode;
+            default -> {
+                plugin.getLogger().warning("配置 hud.default-mode 非法（" + raw + "），已回退 FIXED。");
+                yield "FIXED";
+            }
+        };
+    }
+
+    private Set<java.util.UUID> loadUuids(List<String> raw) {
+        Set<java.util.UUID> out = new java.util.LinkedHashSet<>();
+        for (String entry : raw) {
+            try {
+                out.add(java.util.UUID.fromString(entry.trim()));
+            } catch (IllegalArgumentException exception) {
+                plugin.getLogger().warning("hud 名单存在非法 UUID：" + entry + "，已跳过。");
+            }
+        }
+        return Set.copyOf(out);
+    }
+
+    private Map<String, Double> loadSeasonDoubles(ConfigurationSection section) {
+        Map<String, Double> out = new HashMap<>();
+        if (section == null) {
+            return Map.of();
+        }
+        for (String key : section.getKeys(false)) {
+            String season = key.trim().toLowerCase(Locale.ROOT);
+            if (normalizeSeasons(List.of(season)).isEmpty()) {
+                plugin.getLogger().warning("配置存在非法季节名：" + key + "，已跳过。");
+                continue;
+            }
+            out.put(season, ratio(section.getDouble(key, 0.0), 0.0, key));
+        }
+        return Map.copyOf(out);
+    }
+
+    private Map<String, Set<String>> loadSeasonSets(ConfigurationSection section) {
+        Map<String, Set<String>> out = new HashMap<>();
+        if (section == null) {
+            return Map.of();
+        }
+        for (String key : section.getKeys(false)) {
+            String season = key.trim().toLowerCase(Locale.ROOT);
+            if (normalizeSeasons(List.of(season)).isEmpty()) {
+                plugin.getLogger().warning("配置存在非法季节名：" + key + "，已跳过。");
+                continue;
+            }
+            out.put(season, Set.copyOf(section.getStringList(key)));
+        }
+        return Map.copyOf(out);
     }
 
     private int positive(int value, int fallback, String path) {

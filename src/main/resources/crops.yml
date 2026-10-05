@@ -1,5 +1,6 @@
 # 季节作物配置：0 表示停止生长，0–1 按概率减速，1–2 有概率额外生长一级；温室可绕过限制
-# 说明：仅在此列出的作物生效；名单只控制「生长是否被阻止」，具体由 BlockGrowEvent 驱动
+# 说明：仅在此列出的作物生效；名单只控制「生长是否被阻止」，具体由 BlockGrowEvent / StructureGrowEvent 驱动
+# 树苗与真菌类走 StructureGrowEvent（催熟成树/巨型蘑菇），其余走 BlockGrowEvent
 crops:
   WHEAT: {spring: 1.20, summer: 1.00, autumn: 0.80, winter: 0.00}
   CARROTS: {spring: 1.15, summer: 1.00, autumn: 0.75, winter: 0.00}
@@ -15,6 +16,23 @@ crops:
   SWEET_BERRY_BUSH: {spring: 1.15, summer: 0.80, autumn: 1.10, winter: 0.00}
   NETHER_WART: {spring: 0.00, summer: 0.50, autumn: 1.00, winter: 1.00}
   COCOA: {spring: 0.90, summer: 1.20, autumn: 0.90, winter: 0.00}
+  KELP: {spring: 1.10, summer: 1.20, autumn: 0.80, winter: 0.40}
+  CHORUS_FLOWER: {spring: 1.00, summer: 1.10, autumn: 0.60, winter: 0.00}
+  CAVE_VINES: {spring: 1.00, summer: 0.90, autumn: 0.90, winter: 0.60}
+  TWISTING_VINES: {spring: 1.00, summer: 1.00, autumn: 0.80, winter: 0.60}
+  WEEPING_VINES: {spring: 1.00, summer: 1.00, autumn: 0.80, winter: 0.60}
+  RED_MUSHROOM: {spring: 0.90, summer: 0.60, autumn: 1.20, winter: 0.30}
+  BROWN_MUSHROOM: {spring: 0.90, summer: 0.60, autumn: 1.20, winter: 0.30}
+  CRIMSON_FUNGUS: {spring: 1.00, summer: 1.00, autumn: 1.00, winter: 0.80}
+  WARPED_FUNGUS: {spring: 1.00, summer: 1.00, autumn: 1.00, winter: 0.80}
+  OAK_SAPLING: {spring: 1.00, summer: 1.00, autumn: 0.50, winter: 0.00}
+  BIRCH_SAPLING: {spring: 1.00, summer: 1.00, autumn: 0.50, winter: 0.00}
+  SPRUCE_SAPLING: {spring: 1.00, summer: 1.00, autumn: 0.70, winter: 0.30}
+  JUNGLE_SAPLING: {spring: 0.90, summer: 1.20, autumn: 0.50, winter: 0.00}
+  ACACIA_SAPLING: {spring: 0.80, summer: 1.20, autumn: 0.50, winter: 0.00}
+  DARK_OAK_SAPLING: {spring: 1.00, summer: 0.90, autumn: 0.50, winter: 0.00}
+  CHERRY_SAPLING: {spring: 1.20, summer: 0.80, autumn: 0.50, winter: 0.00}
+  MANGROVE_PROPAGULE: {spring: 1.00, summer: 1.10, autumn: 0.50, winter: 0.00}
 # 生长修正：对上面 rates 的结果统一乘算（温室内的作物不参与修正）
 growth:
   # 雨天生长率倍率，1.0 表示无加成
@@ -28,5 +46,20 @@ growth:
   underground-multiplier: 0.80
 greenhouse:
   enabled: true
-  # 作物正上方连续玻璃层数
-  glass-above: 3
+  # 温室判定（两种满足其一即受保护）：
+  # ① 屋顶模式：作物上方 1..max-roof-height 格同一柱内出现玻璃；
+  # ② 体积模式：以作物为心、水平 ±radius、高 max-roof-height 的体积内玻璃方块数 >= min-glass-count
+  radius: 7
+  min-glass-count: 16
+  # 体积扫描与屋顶检测的最大层高
+  max-roof-height: 4
+  # 可计入的玻璃类型（材料名）
+  block-types: [GLASS, WHITE_STAINED_GLASS, LIGHT_BLUE_STAINED_GLASS]
+  # 要求判定体积内存在 core-block 才计入温室（默认关）
+  require-core: false
+  core-block: GLASS
+  # 温室内冬季生长倍率（1.0 = 与其他季节一致）
+  winter-bonus: 1.0
+  debug:
+    # 手持该物品右键作物显示温室判定统计
+    stick: STICK

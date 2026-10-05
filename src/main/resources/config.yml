@@ -12,6 +12,8 @@ calendar:
   # 追帧上限（天），防止服务器关服后一次性翻过多天
   max-catchup: 2
   overworld: world
+  # 参考世界：排期天气与计时以它为准；留空回退 overworld
+  time-anchor-world: ""
   # 尚未存在 data/calendar.yml 时生效；之后以 data/calendar.yml 为准
   start-year: 1
   start-day: 1
@@ -23,7 +25,8 @@ weather:
   # 不接管这些世界的天气，避免影响独立玩法世界
   disabled-worlds: []
   # 排期天气：每季按「雨天数」预排本季每日天气（换季或热载后季节变化时重新排期）
-  # 说明：排期天气会在检查周期覆盖管理员手动 /weather 的改动
+  # 说明：排期天气会在检查周期覆盖管理员手动 /weather 的改动；
+  #       respect-manual-commands 开启时，手动改动豁免一次检查周期后恢复接管
   rainy-days:
     spring: 8
     summer: 4
@@ -33,6 +36,11 @@ weather:
   rainy-days-per-season: 5
   # 雨天转为雷暴的概率
   thunder-chance: 0.20
+  # 雷暴/晴天时长区间（tick），排期到该天气时在区间内随机取时长
+  storm-duration-ticks: { min: 6000, max: 18000 }
+  clear-duration-ticks: { min: 6000, max: 24000 }
+  # 尊重手动 /weather：管理员手动切天气后，跳过下一次自动排期（下一周期恢复）
+  respect-manual-commands: true
 hud:
   enabled: true
   # 支持 MiniMessage；三个百分号变量在显示前替换
@@ -43,6 +51,15 @@ hud:
     summer: YELLOW
     autumn: RED
     winter: BLUE
+  # 默认显示模式：FIXED 对所有人固定显示 / VARIABLE 按下方名单 / OFF 关闭
+  default-mode: FIXED
+  # ActionBar 同步输出（BossBar 之外）；隐藏时是否同时清空 ActionBar
+  actionbar:
+    enabled: false
+    clear-on-hide: false
+  # VARIABLE 模式名单（UUID）；不在 variable-players 且不在 off-players 时按 default-mode 处理
+  variable-players: []
+  off-players: []
 visual:
   enabled: true
   # 换季后是否让客户端重发周边区块以刷新视觉
@@ -57,6 +74,33 @@ visual:
     summer: JUNGLE
     autumn: WINDSWEPT_FOREST
     winter: SNOWY_PLAINS
+  # 海洋/河流/浅滩 biome 显示映射：季节 → biome 名（仅客户端显示，实际世界 biome 不变）
+  oceans:
+    enabled: true
+    # rivers 段未启用或该季未配置映射时，河流是否回退跟随海洋映射
+    affect-rivers: true
+    # 浅滩（beach 系）是否一并跟随海洋映射替换
+    affect-shores: true
+    # 保留深海变种：原深海区域映射为 DEEP_目标变体（目标无深海变种时回退目标本体）；
+    # 关闭后深海区域也直接显示浅水目标
+    keep-deep-variants: true
+    seasons:
+      spring: LUKEWARM_OCEAN
+      summer: WARM_OCEAN
+      autumn: COLD_OCEAN
+      winter: FROZEN_OCEAN
+  # 河流 biome 显示映射；某季未配置时在 affect-rivers 开启下回退跟随海洋映射
+  rivers:
+    enabled: true
+    seasons:
+      spring: RIVER
+      summer: SWAMP
+      autumn: RIVER
+      winter: FROZEN_RIVER
+  # 换季过渡：每步推进的显示比例（0.05-0.5），0 = 一次性全量刷新；ticks-per-step 为步进周期
+  ease:
+    ease: 0.20
+    ticks-per-step: 5
   # 秋叶视觉：把橡树/白桦/云杉叶显示为金合欢叶（仅客户端显示，真实方块不变）
   foliage:
     enabled: true
@@ -113,22 +157,81 @@ migration:
   # 名单世界为空时视为全部世界
   worlds: []
   animals: [CHICKEN, COW, PIG, SHEEP, HORSE, RABBIT, GOAT]
+  # 迁徙成功时在落点播放粒子
+  particles: true
+  # 按季生成加成：整季对名单内自然生成实体按概率额外补刷一只（模拟随季节回迁）
+  spawn-boost:
+    spring: 0.15
+    summer: 0.05
+  boost-animals:
+    spring: [CHICKEN, COW, PIG, SHEEP, RABBIT]
+    summer: [CHICKEN, RABBIT]
+  # 暖气候动物（冬季软淘汰）/ 冷气候动物（永不软淘汰）名单
+  warm-animals: [COW, PIG, SHEEP, CHICKEN, HORSE]
+  cold-animals: [GOAT, RABBIT, FOX]
+  # 冬季自然生成时取消暖气候动物的概率
+  soft-despawn-chance: 0.25
+  # 入冬后前 days 天（冬季 day ≤ days）改为清理轮：以玩家为中心按渐增半径
+  # （base-radius + (day-1) × radius-step）软移除暖气候动物，本轮不迁徙
+  winter-cleanup:
+    enabled: true
+    days: 3
+    base-radius: 64
+    radius-step: 64
+    max-per-cycle: 40
 villagers:
   # 生成村民时按季节设置外观类型，冬季/早春概率低生物群系外观
+  enabled: true
+# 落叶快速腐烂：原木被破坏后延迟检查周边悬空树叶并按概率催落（真实方块变更）；
+# 玩家放置的树叶（persistent）不参与催落，避免误删树篱与建筑
+fast-leaf-decay:
+  enabled: false
+  # 搜索半径（格）与每次尝试概率
+  radius: 6
+  chance: 0.8
+  # 延迟（tick）后消失
+  delay-ticks: 5
+# 刷怪季相守卫：被伪装 biome 上禁止刷出错误生境生物（如雪原刷豹猫）
+spawn-guard:
+  enabled: true
+# 季节事件测试命令（/ccseason event）：仅测试环境开启
+event-command:
   enabled: true
 # 特别日子名单：命中时发布 season.special_day 事件，键为「年-日」，值为主创约定标识
 special-days: {}
 messages:
   menu-title: "<gold>季节菜单</gold>"
   guide-title: "季节指南"
+  # 玩家首次进服自动发放指南书（按 UUID 记录在 data/guides.yml）
+  guide-on-first-join: true
   # 每项为指南书的一页，支持 MiniMessage；空列表时生成无正文的指南书
+  # 注意：涉及具体数值的页面需与 crops.yml / weather 段默认值保持同步
   guide-lines:
-    - "<gold>季节指南</gold>"
-    - "<gray>春夏秋冬随日历轮转，囤货与出游留意季节。</gray>"
+    - "<gold>季节指南</gold>\n\n<gray>春夏秋冬随日历轮转，囤货与出游留意季节。</gray>\n\n<dark_gray>实时状态：/ccseason info\n随身 HUD：/ccseason hud</dark_gray>"
+    - "<gold>天气与气候</gold>\n\n<gray>雨天按季排期：春 8 天、夏 4 天、秋 7 天、冬 6 天；约两成雨天伴随雷暴。冬季户外严寒，多数作物停长。</gray>"
+    - "<gold>作物与季节</gold>\n\n<gray>春：小麦、胡萝卜、马铃薯、甜浆果、火焰花生长最快\n夏：西瓜、仙人掌、甘蔗、可可、地狱疣渐入佳境\n秋：南瓜、甜菜、浆果丰收季，适合囤货\n冬：户外几乎停长，仅竹子缓慢生长、地狱疣如常</gray>"
+    - "<gold>温室与生长修正</gold>\n\n<gray>作物上方出现玻璃顶、或周边 7 格内玻璃不少于 16 块，即视为温室，不受季节限制。雨天有生长加成；光照低于 4 按倍率折算；地下种植进一步放缓。</gray>\n<dark_gray>种子物品上会标注适合季节。</dark_gray>"
+    - "<gold>动物与迁徙</gold>\n\n<gray>每个迁徙周期，出生点附近的牛、羊、猪、鸡、马、兔、山羊会被送往更远的草场。入冬前后暖气候动物逐步南迁或被清理，春季回迁补群。村民外观随季节变换。</gray>"
+    - "<gold>季节景观</gold>\n\n<gray>入秋后阔叶换装，落叶乔木变为金色；花草枯荣更替，水域四季色调流转，空气里飘着当季粒子。仅为视觉呈现，破坏方块仍得真实掉落。</gray>"
+    - "<gold>命令一览</gold>\n\n<gray>/ccseason menu 季节菜单\n/ccseason info 当前季节状态\n/ccseason hud 开关 HUD\n/ccseason guide 获得本书\n/ccseason clock 季节时钟\n/ccseason skipday 跳到下一季\n/ccseason year <值> 调整年份\n/ccseason event <事件名> 管理员发布事件\n/ccseason set 管理员调季</gray>"
+  # 作物图鉴：名单内作物（crops.yml）的种子/物品在掉落、拾取、战利品、进服时
+  # 按 PDC 幂等追加「适合季节」「温室光照」lore；数值取自 crops.yml，无需在此配置
+  crop-lore:
+    enabled: true
+    # %seasons% 由适合季节以「、」连接；%light% 取 growth.required-light
+    grows-in: "<gray>适合季节：<green>%seasons%</green></gray>"
+    any-season: "<gray>适合季节：<green>四季皆可</green></gray>"
+    greenhouse: "<dark_gray>温室环境 + 光照 %light%+</dark_gray>"
+    # 季节展示名，键对应 spring/summer/autumn/winter
+    season-names:
+      spring: 春
+      summer: 夏
+      autumn: 秋
+      winter: 冬
   # 命令反馈：全部支持 MiniMessage；缺失时回退内置默认文案
   command:
     permission: "<red>你没有使用季节命令的权限。</red>"
-    usage: "<gray>用法：/ccseason [menu|info|hud|guide|clock|set]</gray>"
+    usage: "<gray>用法：/ccseason [menu|info|hud|guide|clock|skipday|year|event|set]</gray>"
     info: "<gold>第%year%年 %season% 第%day%天</gold>"
     players-only: "<red>该操作只能由玩家执行。</red>"
     menu-players-only: "<red>季节菜单只能由玩家打开。</red>"
@@ -141,6 +244,15 @@ messages:
     season-invalid: "<red>季节必须是 spring、summer、autumn 或 winter。</red>"
     hud-on: "<green>季节 HUD 已开启。</green>"
     hud-off: "<yellow>季节 HUD 已关闭。</yellow>"
+    skipday-done: "<green>已跳过到下一季第一天。</green>"
+    year-usage: "<gray>用法：/ccseason year <数值></gray>"
+    year-set: "<green>年份已调整。</green>"
+    year-invalid: "<red>年份必须是正整数。</red>"
+    event-usage: "<gray>用法：/ccseason event <事件名> [json负载]</gray>"
+    event-done: "<green>事件已发布。</green>"
+    event-disabled: "<red>季节事件命令未开启。</red>"
+    # 手持 debug.stick 右键作物时的温室判定统计
+    greenhouse-debug: "<gray>温室检测：玻璃 %glass% 块 · 屋顶 %roof% · 核心 %core% · %result%</gray>"
   # 菜单按钮文案（支持 MiniMessage）
   gui:
     status: "季节状态"

@@ -63,7 +63,10 @@ public final class ChiliSeasonPlugin extends JavaPlugin {
         papi = new PapiAdapter(this, service, settings);
         visual = new ProtocolVisualAdapter(this, service, settings);
 
-        getServer().getPluginManager().registerEvents(new SeasonListener(settings, service), this);
+        // 主任务须先于监听器创建：SeasonListener 手动天气钩子需要回调 task
+        task = new SeasonTask(this, settings, service, hidden);
+        getServer().getPluginManager().registerEvents(new SeasonListener(this, settings, service, task), this);
+        getServer().getPluginManager().registerEvents(new SeasonCropLoreListener(this, settings), this);
         PluginCommand command = getCommand("ccseason");
         if (command == null) {
             getLogger().severe("缺少 ccseason 命令声明，插件已禁用。");
@@ -71,7 +74,7 @@ public final class ChiliSeasonPlugin extends JavaPlugin {
             return;
         }
         SeasonGui seasonGui = new SeasonGui(service, settings, hidden);
-        commandHandler = new SeasonCommand(service, settings, hidden, seasonGui);
+        commandHandler = new SeasonCommand(api, service, settings, hidden, seasonGui);
         command.setExecutor(commandHandler);
         command.setTabCompleter(commandHandler);
         try {
@@ -92,7 +95,6 @@ public final class ChiliSeasonPlugin extends JavaPlugin {
             return;
         }
 
-        task = new SeasonTask(this, settings, service, hidden);
         mainTask = getServer().getScheduler().runTaskTimer(this, task, 20L, 20L);
         restartMigrationTask();
 
@@ -129,7 +131,7 @@ public final class ChiliSeasonPlugin extends JavaPlugin {
         }
         long migrationTicks = settings.migrationPeriod * 20L;
         migrationTask = getServer().getScheduler().runTaskTimer(
-                this, new AnimalMigrationTask(this, settings), migrationTicks, migrationTicks);
+                this, new AnimalMigrationTask(this, settings, service), migrationTicks, migrationTicks);
     }
 
     @Override

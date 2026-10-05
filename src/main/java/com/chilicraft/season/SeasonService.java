@@ -71,7 +71,8 @@ final class SeasonService {
         if (!settings.followWorld) {
             return;
         }
-        World world = Bukkit.getWorld(settings.overworld);
+        // 时间锚点世界：昼夜推进与睡觉翻日均以其为准（time-anchor-world 留空回退 overworld）
+        World world = Bukkit.getWorld(settings.timeAnchorWorld);
         if (world == null) {
             return;
         }
@@ -125,8 +126,24 @@ final class SeasonService {
         publishDateEvents(changed, "command");
     }
 
+    /** /ccseason year：调整年份（≥1），季节与季内日序保持不变。 */
+    void setYearFromCommand(int year) {
+        int target = Math.max(1, year);
+        state = new CalendarState(target, state.day(), state.season());
+        persist();
+        publishDateEvents(false, "command");
+    }
+
+    /** /ccseason skipday：连翻到下一季第一天，逐日发布事件与睡觉翻日的补推语义一致。 */
+    void skipToNextSeasonFromCommand() {
+        int remaining = settings.daysPerSeason - state.day() + 1;
+        while (remaining-- > 0) {
+            nextDay("command");
+        }
+    }
+
     void advanceFromSleep(World world) {
-        if (!settings.advanceSleep || !world.getName().equals(settings.overworld)) {
+        if (!settings.advanceSleep || !world.getName().equals(settings.timeAnchorWorld)) {
             return;
         }
         if (!settings.requirePlayers || !Bukkit.getOnlinePlayers().isEmpty()) {
